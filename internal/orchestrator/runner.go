@@ -18,12 +18,14 @@ type Config struct {
 	CopilotModel         string
 	CommandTimeout       time.Duration
 	DisableCommandOutput bool
+	StopChecker          StopChecker
 }
 
 type Runner struct {
 	cfg      Config
 	brain    brain.Brain
 	executor CommandExecutor
+	stop     StopChecker
 }
 
 const defaultStatusFile = "_bmad-output/implementation-artifacts/sprint-status.yaml"
@@ -59,11 +61,16 @@ func New(cfg Config) (*Runner, error) {
 		cfg:      cfg,
 		brain:    selectedBrain,
 		executor: NewSDKExecutor(cfg.Workdir, cfg.CopilotModel),
+		stop:     withDefaultStopChecker(cfg.StopChecker),
 	}, nil
 }
 
 func (r *Runner) Run(ctx context.Context) error {
 	for {
+		if r.stopRequested() {
+			return nil
+		}
+
 		sprintStatus, err := LoadSprintStatus(r.cfg.StatusFile)
 		if err != nil {
 			return err
@@ -86,22 +93,42 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		for _, action := range primaryActions {
+			if r.stopRequested() {
+				return nil
+			}
 			if _, _, err := r.runStep(ctx, story.Key, action); err != nil {
 				return err
+			}
+			if r.stopRequested() {
+				return nil
 			}
 		}
 
 		reviewAction := ReviewAction(storyNumber)
 		for {
+			if r.stopRequested() {
+				return nil
+			}
 			result, afterStatus, err := r.runStep(ctx, story.Key, reviewAction)
 			if err != nil {
 				return err
+			}
+			if r.stopRequested() {
+				return nil
 			}
 			if !ShouldContinueReview(afterStatus, result.Published) {
 				break
 			}
 		}
 	}
+}
+
+func (r *Runner) stopRequested() bool {
+	if r.stop.ShouldStop() {
+		fmt.Println("STOP: graceful stop requested; exiting loop")
+		return true
+	}
+	return false
 }
 
 func (r *Runner) runStep(ctx context.Context, storyKey string, action Action) (ExecResult, string, error) {

@@ -20,6 +20,11 @@ Defaults:
 - Copilot execution: fresh SDK client/session per command, with `--yolo --no-ask-user -s`
 - Logging: each action prints the raw Copilot output block plus a one-line summarized `RESULT` (enabled by default)
 
+Interactive loop hotkeys (TTY only):
+
+- `Ctrl+S`: request graceful stop after the current command finishes
+- `Ctrl+A`: cancel a previously requested graceful stop
+
 ## Useful flags
 
 - `--status-file <path>`
