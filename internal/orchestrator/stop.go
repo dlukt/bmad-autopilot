@@ -7,7 +7,8 @@ type StopChecker interface {
 }
 
 type StopController struct {
-	requested atomic.Bool
+	requested     atomic.Bool
+	poweroffArmed atomic.Bool
 }
 
 func NewStopController() *StopController {
@@ -33,6 +34,23 @@ func (c *StopController) ShouldStop() bool {
 		return false
 	}
 	return c.requested.Load()
+}
+
+func (c *StopController) TogglePoweroff() bool {
+	if c == nil {
+		return false
+	}
+
+	next := !c.poweroffArmed.Load()
+	c.poweroffArmed.Store(next)
+	return next
+}
+
+func (c *StopController) PoweroffArmed() bool {
+	if c == nil {
+		return false
+	}
+	return c.poweroffArmed.Load()
 }
 
 type neverStopChecker struct{}

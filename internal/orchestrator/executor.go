@@ -3,10 +3,13 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	copilot "github.com/github/copilot-sdk/go"
 )
@@ -18,6 +21,7 @@ type ExecResult struct {
 	PushObserved     bool
 	UpstreamAdvanced bool
 	Published        bool
+	LiveOutput       bool
 }
 
 type CommandExecutor interface {
@@ -27,12 +31,26 @@ type CommandExecutor interface {
 type SDKExecutor struct {
 	workdir      string
 	copilotModel string
+	output       io.Writer
+	liveOutput   bool
 }
 
-func NewSDKExecutor(workdir, copilotModel string) *SDKExecutor {
+type SDKExecutorOptions struct {
+	Output     io.Writer
+	LiveOutput bool
+}
+
+func NewSDKExecutor(workdir, copilotModel string, options SDKExecutorOptions) *SDKExecutor {
+	output := options.Output
+	if output == nil {
+		output = os.Stdout
+	}
+
 	return &SDKExecutor{
 		workdir:      workdir,
 		copilotModel: strings.TrimSpace(copilotModel),
+		output:       output,
+		liveOutput:   options.LiveOutput,
 	}
 }
 
@@ -52,6 +70,7 @@ func (e *SDKExecutor) Run(ctx context.Context, action Action) (ExecResult, error
 	sessionCfg := &copilot.SessionConfig{
 		WorkingDirectory:    e.workdir,
 		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		Streaming:           e.liveOutput,
 	}
 	if e.copilotModel != "" {
 		sessionCfg.Model = e.copilotModel
@@ -63,12 +82,87 @@ func (e *SDKExecutor) Run(ctx context.Context, action Action) (ExecResult, error
 	}
 	defer session.Destroy()
 
+	var liveBuilder strings.Builder
+	var liveMu sync.Mutex
+	lastLineEnded := true
+
+	writeLiveChunk := func(chunk string) {
+		if chunk == "" {
+			return
+		}
+		liveMu.Lock()
+		defer liveMu.Unlock()
+
+		_, _ = io.WriteString(e.output, chunk)
+		liveBuilder.WriteString(chunk)
+		lastLineEnded = strings.HasSuffix(chunk, "\n")
+	}
+
+	writeLiveLine := func(prefix, content string) {
+		content = oneLine(content)
+		if content == "" {
+			return
+		}
+
+		liveMu.Lock()
+		defer liveMu.Unlock()
+
+		if !lastLineEnded {
+			_, _ = io.WriteString(e.output, "\n")
+			liveBuilder.WriteString("\n")
+		}
+		line := fmt.Sprintf("[%s] %s\n", prefix, content)
+		_, _ = io.WriteString(e.output, line)
+		liveBuilder.WriteString(line)
+		lastLineEnded = true
+	}
+
+	var unsubscribe func()
+	if e.liveOutput {
+		fmt.Fprintln(e.output, "OUTPUT (live):")
+		unsubscribe = session.On(func(event copilot.SessionEvent) {
+			switch event.Type {
+			case copilot.AssistantMessageDelta, copilot.AssistantReasoningDelta, copilot.AssistantStreamingDelta:
+				if event.Data.DeltaContent != nil {
+					writeLiveChunk(*event.Data.DeltaContent)
+				}
+			case copilot.ToolExecutionProgress:
+				if event.Data.ProgressMessage != nil {
+					writeLiveLine("tool", *event.Data.ProgressMessage)
+				}
+			case copilot.ToolExecutionPartialResult:
+				if event.Data.PartialOutput != nil {
+					writeLiveLine("tool", *event.Data.PartialOutput)
+				}
+			case copilot.SessionError:
+				if event.Data.Message != nil {
+					writeLiveLine("session-error", *event.Data.Message)
+				}
+			}
+		})
+		defer unsubscribe()
+	}
+
 	_, sendErr := session.SendAndWait(ctx, copilot.MessageOptions{
 		Prompt: action.Prompt,
 	})
 
+	if e.liveOutput {
+		liveMu.Lock()
+		if !lastLineEnded {
+			_, _ = io.WriteString(e.output, "\n")
+			liveBuilder.WriteString("\n")
+			lastLineEnded = true
+		}
+		liveMu.Unlock()
+	}
+
 	events, eventsErr := session.GetMessages(ctx)
 	rawOutput := collectOutput(events)
+	liveOutput := strings.TrimSpace(liveBuilder.String())
+	if rawOutput == "" && liveOutput != "" {
+		rawOutput = liveOutput
+	}
 	if rawOutput == "" && sendErr != nil {
 		rawOutput = sendErr.Error()
 	}
@@ -85,6 +179,7 @@ func (e *SDKExecutor) Run(ctx context.Context, action Action) (ExecResult, error
 		PushObserved:     pushEvidencePattern.MatchString(rawOutput),
 		UpstreamAdvanced: upstreamChanged(beforeRef, beforeOK, afterRef, afterOK),
 		Published:        publicationSatisfied(clean, cleanOK, ahead, aheadOK, headRef, headOK, afterRef, afterOK),
+		LiveOutput:       e.liveOutput,
 	}
 
 	if sendErr != nil {

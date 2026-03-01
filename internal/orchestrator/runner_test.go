@@ -119,8 +119,12 @@ development_status:
 		stop:     stopController,
 	}
 
-	if err := runner.Run(context.Background()); err != nil {
+	outcome, err := runner.Run(context.Background())
+	if err != nil {
 		t.Fatalf("run failed: %v", err)
+	}
+	if outcome != RunOutcomeStopped {
+		t.Fatalf("expected stopped outcome, got %v", outcome)
 	}
 
 	commands := executor.Commands()

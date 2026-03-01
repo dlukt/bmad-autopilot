@@ -19,11 +19,13 @@ Defaults:
 - Copilot model: unset
 - Copilot execution: fresh SDK client/session per command, with `--yolo --no-ask-user -s`
 - Logging: each action prints the raw Copilot output block plus a one-line summarized `RESULT` (enabled by default)
+- Live command output: streamed from Copilot events when `--show-command-output=true`
 
 Interactive loop hotkeys (TTY only):
 
 - `Ctrl+S`: request graceful stop after the current command finishes
 - `Ctrl+A`: cancel a previously requested graceful stop
+- `Ctrl+P`: toggle system poweroff at full loop completion (all non-retrospective stories done)
 
 ## Useful flags
 

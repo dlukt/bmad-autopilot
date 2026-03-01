@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dlukt/bmad-autopilot/internal/orchestrator"
 
@@ -21,7 +22,12 @@ func newRunCmd(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer stopHotkeys()
+			hotkeysClosed := false
+			defer func() {
+				if !hotkeysClosed {
+					stopHotkeys()
+				}
+			}()
 
 			runner, err := orchestrator.New(orchestrator.Config{
 				StatusFile:           opts.statusFile,
@@ -35,7 +41,22 @@ func newRunCmd(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runner.Run(runCtx)
+			outcome, err := runner.Run(runCtx)
+			if err != nil {
+				return err
+			}
+
+			stopHotkeys()
+			hotkeysClosed = true
+
+			if outcome == orchestrator.RunOutcomeCompleted && stopController.PoweroffArmed() {
+				fmt.Fprintln(cmd.OutOrStdout(), "POWEROFF: armed and loop completed; running `sudo systemctl poweroff`")
+				if err := runSystemPoweroff(runCtx, cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+					return err
+				}
+			}
+
+			return nil
 		},
 	}
 }

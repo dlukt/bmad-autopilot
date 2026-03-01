@@ -13,6 +13,7 @@ import (
 const (
 	ctrlA = byte(1)
 	ctrlC = byte(3)
+	ctrlP = byte(16)
 	ctrlS = byte(19)
 )
 
@@ -22,6 +23,7 @@ const (
 	stopHotkeyRequest stopHotkeySignal = iota + 1
 	stopHotkeyCancel
 	stopHotkeyInterrupt
+	stopHotkeyTogglePoweroff
 )
 
 func startStopHotkeys(
@@ -46,6 +48,7 @@ func startStopHotkeys(
 	go applyStopHotkeys(signals, done, stopController, cancel, output)
 
 	fmt.Fprintln(output, "HOTKEYS: Ctrl+S requests graceful stop after the current command; Ctrl+A cancels it")
+	fmt.Fprintln(output, "HOTKEYS: Ctrl+P toggles poweroff at full completion")
 
 	return func() {
 		close(done)
@@ -86,6 +89,11 @@ func watchStopHotkeys(signals chan<- stopHotkeySignal, done <-chan struct{}) {
 			case signals <- stopHotkeyInterrupt:
 			default:
 			}
+		case ctrlP:
+			select {
+			case signals <- stopHotkeyTogglePoweroff:
+			default:
+			}
 		}
 	}
 }
@@ -112,6 +120,13 @@ func applyStopHotkeys(
 			case stopHotkeyInterrupt:
 				fmt.Fprintln(output, "INTERRUPT: Ctrl+C pressed; canceling active command")
 				cancel()
+			case stopHotkeyTogglePoweroff:
+				armed := stopController.TogglePoweroff()
+				if armed {
+					fmt.Fprintln(output, "POWEROFF: armed; system will power off when the full loop completes")
+				} else {
+					fmt.Fprintln(output, "POWEROFF: disarmed")
+				}
 			}
 		}
 	}

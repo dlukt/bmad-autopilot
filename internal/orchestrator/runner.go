@@ -30,6 +30,14 @@ type Runner struct {
 
 const defaultStatusFile = "_bmad-output/implementation-artifacts/sprint-status.yaml"
 
+type RunOutcome int
+
+const (
+	RunOutcomeUnknown RunOutcome = iota
+	RunOutcomeCompleted
+	RunOutcomeStopped
+)
+
 func New(cfg Config) (*Runner, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -58,63 +66,65 @@ func New(cfg Config) (*Runner, error) {
 	}
 
 	return &Runner{
-		cfg:      cfg,
-		brain:    selectedBrain,
-		executor: NewSDKExecutor(cfg.Workdir, cfg.CopilotModel),
-		stop:     withDefaultStopChecker(cfg.StopChecker),
+		cfg:   cfg,
+		brain: selectedBrain,
+		executor: NewSDKExecutor(cfg.Workdir, cfg.CopilotModel, SDKExecutorOptions{
+			LiveOutput: !cfg.DisableCommandOutput,
+		}),
+		stop: withDefaultStopChecker(cfg.StopChecker),
 	}, nil
 }
 
-func (r *Runner) Run(ctx context.Context) error {
+func (r *Runner) Run(ctx context.Context) (RunOutcome, error) {
 	for {
 		if r.stopRequested() {
-			return nil
+			return RunOutcomeStopped, nil
 		}
 
 		sprintStatus, err := LoadSprintStatus(r.cfg.StatusFile)
 		if err != nil {
-			return err
+			return RunOutcomeUnknown, err
 		}
 
 		story, ok := sprintStatus.NextPendingStory()
 		if !ok {
 			fmt.Println("DONE: all non-retrospective stories are done")
-			return nil
+			return RunOutcomeCompleted, nil
 		}
 
 		storyNumber, err := StoryNumberFromKey(story.Key)
 		if err != nil {
-			return err
+			return RunOutcomeUnknown, err
 		}
 
 		primaryActions, err := PlanPrimaryActions(story.Status, storyNumber)
 		if err != nil {
-			return err
+			return RunOutcomeUnknown, err
 		}
 
 		for _, action := range primaryActions {
 			if r.stopRequested() {
-				return nil
+				return RunOutcomeStopped, nil
 			}
 			if _, _, err := r.runStep(ctx, story.Key, action); err != nil {
-				return err
+				return RunOutcomeUnknown, err
 			}
 			if r.stopRequested() {
-				return nil
+				return RunOutcomeStopped, nil
 			}
 		}
 
 		reviewAction := ReviewAction(storyNumber)
 		for {
 			if r.stopRequested() {
-				return nil
+				return RunOutcomeStopped, nil
 			}
 			result, afterStatus, err := r.runStep(ctx, story.Key, reviewAction)
 			if err != nil {
-				return err
+				return RunOutcomeUnknown, err
 			}
 			if r.stopRequested() {
-				return nil
+				return RunOutcomeStopped, nil
 			}
 			if !ShouldContinueReview(afterStatus, result.Published) {
 				break
@@ -149,7 +159,11 @@ func (r *Runner) runStep(ctx context.Context, storyKey string, action Action) (E
 
 	execResult, execErr := r.executor.Run(commandCtx, action)
 	if !r.cfg.DisableCommandOutput {
-		r.printRawOutput(execResult.RawOutput)
+		if execResult.LiveOutput {
+			fmt.Println("OUTPUT: <streamed live>")
+		} else {
+			r.printRawOutput(execResult.RawOutput)
+		}
 	}
 
 	resultLine := r.summarizeResult(commandCtx, action.Command, execResult.RawOutput)
