@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/dlukt/bmad-autopilot/internal/orchestrator"
 	"golang.org/x/term"
@@ -36,9 +39,9 @@ func startStopHotkeys(
 		return func() {}, nil
 	}
 
-	previousState, err := term.MakeRaw(fd)
+	restoreTerminal, err := enableHotkeyTerminalMode()
 	if err != nil {
-		return nil, fmt.Errorf("enable raw terminal mode for stop hotkeys: %w", err)
+		return nil, err
 	}
 
 	signals := make(chan stopHotkeySignal, 4)
@@ -52,8 +55,63 @@ func startStopHotkeys(
 
 	return func() {
 		close(done)
-		_ = term.Restore(fd, previousState)
+		_ = restoreTerminal()
 	}, nil
+}
+
+func enableHotkeyTerminalMode() (func() error, error) {
+	savedState, err := readSttyState()
+	if err != nil {
+		return nil, fmt.Errorf("read terminal state: %w", err)
+	}
+
+	// Keep output processing enabled (no broken line wraps), but switch input
+	// to single-byte mode and disable flow control so Ctrl+S is captured.
+	if err := runStty("-icanon", "-echo", "-ixon", "-isig", "min", "1", "time", "0"); err != nil {
+		return nil, fmt.Errorf("enable hotkey terminal mode: %w", err)
+	}
+
+	return func() error {
+		return runStty(savedState)
+	}, nil
+}
+
+func readSttyState() (string, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	command := exec.Command("stty", "-g")
+	command.Stdin = os.Stdin
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		errText := strings.TrimSpace(stderr.String())
+		if errText == "" {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %s", err, errText)
+	}
+
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+func runStty(args ...string) error {
+	var stderr bytes.Buffer
+
+	command := exec.Command("stty", args...)
+	command.Stdin = os.Stdin
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		errText := strings.TrimSpace(stderr.String())
+		if errText == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, errText)
+	}
+
+	return nil
 }
 
 func watchStopHotkeys(signals chan<- stopHotkeySignal, done <-chan struct{}) {
