@@ -20,12 +20,16 @@ Defaults:
 - Copilot execution: fresh SDK client/session per command, with `--yolo --no-ask-user -s`
 - Logging: each action prints the raw Copilot output block plus a one-line summarized `RESULT` (enabled by default)
 - Live command output: streamed from Copilot events when `--show-command-output=true`
+- TUI: Bubble Tea interface is enabled by default on interactive terminals (`--tui=true`)
 
-Interactive loop hotkeys (TTY only):
+Interactive controls:
 
 - `Ctrl+S`: request graceful stop after the current command finishes
 - `Ctrl+A`: cancel a previously requested graceful stop
 - `Ctrl+P`: toggle system poweroff at full loop completion (all non-retrospective stories done)
+- `Ctrl+C`: cancel the active command
+- `Up/Down`, `PgUp/PgDn`: scroll output in TUI mode
+- `q`: quit TUI after the run has ended
 
 ## Useful flags
 
@@ -35,3 +39,4 @@ Interactive loop hotkeys (TTY only):
 - `--copilot-model <model-id>`
 - `--show-command-output <true|false>` (default: `true`)
 - `--timeout <duration>` (use `0` to disable timeout)
+- `--tui <true|false>` (default: `true`, only active on interactive terminals)

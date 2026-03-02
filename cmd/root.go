@@ -15,6 +15,7 @@ type rootOptions struct {
 	copilotModel      string
 	timeout           time.Duration
 	showCommandOutput bool
+	tui               bool
 }
 
 // Execute runs the CLI entrypoint.
@@ -32,6 +33,7 @@ func newRootCmd() *cobra.Command {
 		workdir:           "",
 		timeout:           0,
 		showCommandOutput: true,
+		tui:               true,
 	}
 
 	cmd := &cobra.Command{
@@ -45,6 +47,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&opts.copilotModel, "copilot-model", opts.copilotModel, "Optional Copilot model override")
 	cmd.PersistentFlags().DurationVar(&opts.timeout, "timeout", opts.timeout, "Per-command timeout (0 disables timeout)")
 	cmd.PersistentFlags().BoolVar(&opts.showCommandOutput, "show-command-output", opts.showCommandOutput, "Print raw Copilot output for each command (default: true)")
+	cmd.PersistentFlags().BoolVar(&opts.tui, "tui", opts.tui, "Enable Bubble Tea TUI in interactive terminals (default: true)")
 
 	cmd.AddCommand(newRunCmd(opts))
 	return cmd

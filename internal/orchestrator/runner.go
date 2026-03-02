@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ type Config struct {
 	CommandTimeout       time.Duration
 	DisableCommandOutput bool
 	StopChecker          StopChecker
+	Output               io.Writer
 }
 
 type Runner struct {
@@ -26,6 +28,7 @@ type Runner struct {
 	brain    brain.Brain
 	executor CommandExecutor
 	stop     StopChecker
+	output   io.Writer
 }
 
 const defaultStatusFile = "_bmad-output/implementation-artifacts/sprint-status.yaml"
@@ -64,14 +67,21 @@ func New(cfg Config) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
+	output := cfg.Output
+	if output == nil {
+		output = os.Stdout
+	}
+	cfg.Output = output
 
 	return &Runner{
 		cfg:   cfg,
 		brain: selectedBrain,
 		executor: NewSDKExecutor(cfg.Workdir, cfg.CopilotModel, SDKExecutorOptions{
+			Output:     cfg.Output,
 			LiveOutput: !cfg.DisableCommandOutput,
 		}),
-		stop: withDefaultStopChecker(cfg.StopChecker),
+		stop:   withDefaultStopChecker(cfg.StopChecker),
+		output: cfg.Output,
 	}, nil
 }
 
@@ -88,7 +98,7 @@ func (r *Runner) Run(ctx context.Context) (RunOutcome, error) {
 
 		story, ok := sprintStatus.NextPendingStory()
 		if !ok {
-			fmt.Println("DONE: all non-retrospective stories are done")
+			r.logf("DONE: all non-retrospective stories are done\n")
 			return RunOutcomeCompleted, nil
 		}
 
@@ -135,7 +145,7 @@ func (r *Runner) Run(ctx context.Context) (RunOutcome, error) {
 
 func (r *Runner) stopRequested() bool {
 	if r.stop.ShouldStop() {
-		fmt.Println("STOP: graceful stop requested; exiting loop")
+		r.logf("STOP: graceful stop requested; exiting loop\n")
 		return true
 	}
 	return false
@@ -146,9 +156,9 @@ func (r *Runner) runStep(ctx context.Context, storyKey string, action Action) (E
 	if err != nil {
 		return ExecResult{}, "", err
 	}
-	fmt.Printf("STORY: %s\n", storyKey)
-	fmt.Printf("STATUS(before): %s\n", beforeStatus)
-	fmt.Printf("ACTION: %s\n", action.Command)
+	r.logf("STORY: %s\n", storyKey)
+	r.logf("STATUS(before): %s\n", beforeStatus)
+	r.logf("ACTION: %s\n", action.Command)
 
 	commandCtx := ctx
 	cancel := func() {}
@@ -160,7 +170,7 @@ func (r *Runner) runStep(ctx context.Context, storyKey string, action Action) (E
 	execResult, execErr := r.executor.Run(commandCtx, action)
 	if !r.cfg.DisableCommandOutput {
 		if execResult.LiveOutput {
-			fmt.Println("OUTPUT: <streamed live>")
+			r.logf("OUTPUT: <streamed live>\n")
 		} else {
 			r.printRawOutput(execResult.RawOutput)
 		}
@@ -174,13 +184,13 @@ func (r *Runner) runStep(ctx context.Context, storyKey string, action Action) (E
 			resultLine = fmt.Sprintf("%s; error: %v", resultLine, execErr)
 		}
 	}
-	fmt.Printf("RESULT: %s\n", oneLine(resultLine))
+	r.logf("RESULT: %s\n", oneLine(resultLine))
 
 	afterStatus, err := r.statusForStory(storyKey)
 	if err != nil {
 		return execResult, "", err
 	}
-	fmt.Printf("STATUS(after): %s\n", afterStatus)
+	r.logf("STATUS(after): %s\n", afterStatus)
 
 	if execErr != nil {
 		return execResult, afterStatus, execErr
@@ -227,11 +237,19 @@ func oneLine(s string) string {
 func (r *Runner) printRawOutput(rawOutput string) {
 	trimmed := strings.TrimSpace(rawOutput)
 	if trimmed == "" {
-		fmt.Println("OUTPUT: <no output>")
+		r.logf("OUTPUT: <no output>\n")
 		return
 	}
-	fmt.Println("OUTPUT:")
-	fmt.Println(trimmed)
+	r.logf("OUTPUT:\n")
+	r.logf("%s\n", trimmed)
+}
+
+func (r *Runner) logf(format string, args ...any) {
+	out := r.output
+	if out == nil {
+		out = os.Stdout
+	}
+	fmt.Fprintf(out, format, args...)
 }
 
 func resolveStatusFilePath(statusFile, cwd string) (string, error) {
