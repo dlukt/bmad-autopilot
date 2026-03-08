@@ -219,8 +219,7 @@ func collectOutput(events []copilot.SessionEvent) string {
 		appendField(event.Data.PartialOutput)
 		appendField(event.Data.ProgressMessage)
 		if event.Data.Result != nil {
-			content := event.Data.Result.Content
-			appendField(&content)
+			appendField(event.Data.Result.Content)
 			appendField(event.Data.Result.DetailedContent)
 		}
 	}
