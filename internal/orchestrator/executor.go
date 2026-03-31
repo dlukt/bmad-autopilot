@@ -122,19 +122,19 @@ func (e *SDKExecutor) Run(ctx context.Context, action Action) (ExecResult, error
 		fmt.Fprintln(e.output, "OUTPUT (live):")
 		unsubscribe = session.On(func(event copilot.SessionEvent) {
 			switch event.Type {
-			case copilot.AssistantMessageDelta, copilot.AssistantReasoningDelta, copilot.AssistantStreamingDelta:
+			case copilot.SessionEventTypeAssistantMessageDelta, copilot.SessionEventTypeAssistantReasoningDelta, copilot.SessionEventTypeAssistantStreamingDelta:
 				if event.Data.DeltaContent != nil {
 					writeLiveChunk(*event.Data.DeltaContent)
 				}
-			case copilot.ToolExecutionProgress:
+			case copilot.SessionEventTypeToolExecutionProgress:
 				if event.Data.ProgressMessage != nil {
 					writeLiveLine("tool", *event.Data.ProgressMessage)
 				}
-			case copilot.ToolExecutionPartialResult:
+			case copilot.SessionEventTypeToolExecutionPartialResult:
 				if event.Data.PartialOutput != nil {
 					writeLiveLine("tool", *event.Data.PartialOutput)
 				}
-			case copilot.SessionError:
+			case copilot.SessionEventTypeSessionError:
 				if event.Data.Message != nil {
 					writeLiveLine("session-error", *event.Data.Message)
 				}
