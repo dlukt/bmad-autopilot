@@ -18,6 +18,7 @@ type Config struct {
 	Workdir              string
 	CopilotModel         string
 	CommandTimeout       time.Duration
+	SlashCommands        SlashCommandOptions
 	DisableCommandOutput bool
 	StopChecker          StopChecker
 	Output               io.Writer
@@ -56,6 +57,7 @@ func New(cfg Config) (*Runner, error) {
 	if strings.TrimSpace(cfg.Workdir) == "" {
 		cfg.Workdir = inferWorkdirFromStatusFile(cfg.StatusFile, cwd)
 	}
+	cfg.SlashCommands = normalizeSlashCommandOptions(cfg.SlashCommands)
 
 	absWorkdir, err := filepath.Abs(cfg.Workdir)
 	if err != nil {
@@ -107,7 +109,7 @@ func (r *Runner) Run(ctx context.Context) (RunOutcome, error) {
 			return RunOutcomeUnknown, err
 		}
 
-		primaryActions, err := PlanPrimaryActions(story.Status, storyNumber)
+		primaryActions, err := PlanPrimaryActions(story.Status, storyNumber, r.cfg.SlashCommands)
 		if err != nil {
 			return RunOutcomeUnknown, err
 		}
@@ -124,7 +126,7 @@ func (r *Runner) Run(ctx context.Context) (RunOutcome, error) {
 			}
 		}
 
-		reviewAction := ReviewAction(storyNumber)
+		reviewAction := ReviewAction(storyNumber, r.cfg.SlashCommands)
 		for {
 			if r.stopRequested() {
 				return RunOutcomeStopped, nil

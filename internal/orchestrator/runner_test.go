@@ -131,7 +131,7 @@ development_status:
 	if len(commands) != 1 {
 		t.Fatalf("expected exactly one command before graceful stop, got %d (%v)", len(commands), commands)
 	}
-	if !strings.Contains(commands[0], "/bmad-bmm-create-story 1-1") {
+	if !strings.Contains(commands[0], "/bmad-create-story 1-1") {
 		t.Fatalf("expected first command to be create-story for 1-1, got %q", commands[0])
 	}
 }
